@@ -1,0 +1,267 @@
+#include <cuda_runtime.h>
+#include <iostream>
+#include <windows.h>
+
+#include "terminalPBC_API.cpp"
+
+struct ProcessedTriangle {
+    float x0, y0, z0, iz0; VaryData vary0;
+    float x1, y1, z1, iz1; VaryData vary1;
+    float x2, y2, z2, iz2; VaryData vary2;
+};
+
+// Limpa os buffers
+__global__ void clearScreenKernel(Color* c_buf, float* d_buf, int size) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < size) {
+        c_buf[i] = { 1.0f, 0.1f, 0.1f, 0.1f };
+        d_buf[i] = 0.0f;
+    }
+}
+
+// Formata para o Windows
+__global__ void formatHDCKernel(Color* c_buf, uint32_t* out_pixels, int size) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < size) {
+        Color c = c_buf[i];
+        uint32_t r = (uint32_t)(fmaxf(0.0f, fminf(1.0f, c.r)) * 255.0f);
+        uint32_t g = (uint32_t)(fmaxf(0.0f, fminf(1.0f, c.g)) * 255.0f);
+        uint32_t b = (uint32_t)(fmaxf(0.0f, fminf(1.0f, c.b)) * 255.0f);
+        out_pixels[i] = (r << 16) | (g << 8) | b;
+    }
+}
+
+// === O NOVO CORAÇÃO DA GPU: 1 THREAD = 1 PIXEL ===
+__global__ void renderPixelsKernel(Framebuffer fb, ProcessedTriangle* triangles, int numTriangles) {
+    // Coordenadas 2D da Thread (O Pixel na Tela)
+    int j = blockIdx.x * blockDim.x + threadIdx.x; // Coluna X
+    int i = blockIdx.y * blockDim.y + threadIdx.y; // Linha Y
+
+    // Se a thread cair fora da tela, descarte
+    if (j >= fb.width || i >= fb.height) return;
+
+    float final_z = 0.0f;
+    Color final_col;
+    bool hit = false;
+
+    // Converte o pixel para matemática de Ponto Fixo sub-pixel (<< 4)
+    int fixed_j = j << 4;
+    int fixed_i = i << 4;
+
+    // Este pixel X,Y verifica os 12 triângulos para ver se ele está dentro de algum
+    for (int t = 0; t < numTriangles; ++t) {
+        ProcessedTriangle tri = triangles[t];
+        float x = tri.x0, y = tri.y0;
+        float x1 = tri.x1, y1 = tri.y1;
+        float x2 = tri.x2, y2 = tri.y2;
+
+        // Bounding Box Test: Se o triângulo está longe deste pixel, ignora imediatamente (Otimização brutal)
+        float minX = PBC_MIN(x, PBC_MIN(x1, x2));
+        float maxX = PBC_MAX(x, PBC_MAX(x1, x2));
+        float minY = PBC_MIN(y, PBC_MIN(y1, y2));
+        float maxY = PBC_MAX(y, PBC_MAX(y1, y2));
+        if (j < minX || j > maxX || i < minY || i > maxY) continue;
+
+        float area_tri = 0.5f * abs(x * (y1 - y2) + x1 * (y2 - y) + x2 * (y - y1));
+        if (area_tri == 0.0f) continue;
+
+        int fixed_x = (int)(x * 16.0f);   int fixed_y = (int)(y * 16.0f);
+        int fixed_x1 = (int)(x1 * 16.0f); int fixed_y1 = (int)(y1 * 16.0f);
+        int fixed_x2 = (int)(x2 * 16.0f); int fixed_y2 = (int)(y2 * 16.0f);
+
+        int delta_xa = fixed_x2 - fixed_x1; int delta_ya = fixed_y2 - fixed_y1;
+        int delta_xb = fixed_x - fixed_x2;  int delta_yb = fixed_y - fixed_y2;
+        int delta_xc = fixed_x1 - fixed_x;  int delta_yc = fixed_y1 - fixed_y;
+
+        int edge_a = ((fixed_j - fixed_x1) * delta_ya >> 4) - ((fixed_i - fixed_y1) * delta_xa >> 4);
+        int edge_b = ((fixed_j - fixed_x2) * delta_yb >> 4) - ((fixed_i - fixed_y2) * delta_xb >> 4);
+        int edge_c = ((fixed_j - fixed_x) * delta_yc >> 4) - ((fixed_i - fixed_y) * delta_xc >> 4);
+
+        bool top_left_edge_a = (edge_a == 0 && (delta_ya < 0 || (delta_ya == 0 && delta_xa > 0)));
+        bool top_left_edge_b = (edge_b == 0 && (delta_yb < 0 || (delta_yb == 0 && delta_xb > 0)));
+        bool top_left_edge_c = (edge_c == 0 && (delta_yc < 0 || (delta_yc == 0 && delta_xc > 0)));
+        bool top_left_edge = top_left_edge_a || top_left_edge_b || top_left_edge_c;
+
+        if ((edge_a < 0 && edge_b < 0 && edge_c < 0) || top_left_edge) {
+            if (edge_a == 0 && !top_left_edge) continue;
+            if (edge_b == 0 && !top_left_edge) continue;
+            if (edge_c == 0 && !top_left_edge) continue;
+
+            float a = 0.5f * abs(j * (y1 - y2) + x1 * (y2 - i) + x2 * (i - y1)) / area_tri;
+            float b = 0.5f * abs(x * (i - y2) + j * (y2 - y) + x2 * (y - i)) / area_tri;
+            float c = 0.5f * abs(x * (y1 - i) + x1 * (i - y) + j * (y - y1)) / area_tri;
+
+            float z_pixel = 1.0f / (a * tri.iz0 + b * tri.iz1 + c * tri.iz2);
+
+            // Se o pixel já tem algo na frente, descarte (Z-Buffer da Thread)
+            if (final_z != 0.0f && z_pixel > final_z) continue;
+
+            final_z = z_pixel;
+
+            float dp_a = z_pixel * a * tri.iz0;
+            float dp_b = z_pixel * b * tri.iz1;
+            float dp_c = z_pixel * c * tri.iz2;
+
+            VaryData vary_in;
+            for (size_t v = 0; v < 8; ++v) {
+                vary_in.v[v] = (tri.vary0.v[v] * dp_a) + (tri.vary1.v[v] * dp_b) + (tri.vary2.v[v] * dp_c);
+            }
+
+            // O seu Shader de Phong é executado isoladamente por este único Pixel
+            final_col = SimplePhongTexture2(vary_in, fb);
+            hit = true;
+        }
+    }
+
+    // Se este pixel acertou algum triângulo, ele escreve na memória principal (Sem Race Conditions)
+    if (hit) {
+        fb.setPixel(j, i, final_col);
+        fb.depth_buffer[i * fb.width + j] = final_z;
+    }
+}
+
+__host__ Vec3 rotate3D(Vec3 v, float angleX, float angleY, float angleZ) {
+    float cosX = std::cos(angleX), sinX = std::sin(angleX);
+    float y1 = v.y * cosX - v.z * sinX;
+    float z1 = v.y * sinX + v.z * cosX;
+
+    float cosY = std::cos(angleY), sinY = std::sin(angleY);
+    float x2 = v.x * cosY + z1 * sinY;
+    float z2 = -v.x * sinY + z1 * cosY;
+
+    float cosZ = std::cos(angleZ), sinZ = std::sin(angleZ);
+    float x3 = x2 * cosZ - y1 * sinZ;
+    float y3 = x2 * sinZ + y1 * cosZ;
+
+    return { x3, y3, z2 };
+}
+
+bool g_running = true;
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (uMsg == WM_DESTROY) { g_running = false; PostQuitMessage(0); return 0; }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+int main() {
+    const int WIDTH = 640;
+    const int HEIGHT = 480;
+
+    Color* d_color_buffer;
+    float* d_depth_buffer;
+    ProcessedTriangle* d_triangles;
+    uint32_t* d_display_pixels;
+    cudaMallocManaged(&d_display_pixels, WIDTH * HEIGHT * sizeof(uint32_t));
+    cudaMallocManaged(&d_color_buffer, WIDTH * HEIGHT * sizeof(Color));
+    cudaMallocManaged(&d_depth_buffer, WIDTH * HEIGHT * sizeof(float));
+    cudaMallocManaged(&d_triangles, 12 * sizeof(ProcessedTriangle));
+
+    Framebuffer fb(WIDTH, HEIGHT, d_color_buffer, d_depth_buffer);
+
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    WNDCLASSW wc = { 0 };
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"CUDARendererClass";
+    RegisterClassW(&wc);
+
+    RECT rect = { 0, 0, WIDTH, HEIGHT };
+    AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND hwnd = CreateWindowExW(0, L"CUDARendererClass", L"Motor Grafico CUDA - Screen Space",
+        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top,
+        NULL, NULL, hInstance, NULL);
+    ShowWindow(hwnd, SW_SHOW);
+
+    Vec3 vertices[8] = { {-1,-1,-1}, {1,-1,-1}, {1,1,-1}, {-1,1,-1}, {-1,-1,1}, {1,-1,1}, {1,1,1}, {-1,1,1} };
+    Quad quads[6] = {
+        {{0,1,2,3},{0,0,-1}}, {{5,4,7,6},{0,0,1}}, {{4,0,3,7},{-1,0,0}},
+        {{1,5,6,2},{1,0,0}}, {{3,2,6,7},{0,1,0}}, {{4,5,1,0},{0,-1,0}}
+    };
+    Vec2 uvs[4] = { {0,0}, {1,0}, {1,1}, {0,1} };
+
+    float rotX = 0.0f, rotY = 0.0f, rotZ = 0.0f;
+    MSG msg = { 0 };
+
+    while (g_running) {
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg); DispatchMessage(&msg);
+        }
+        else {
+            int totalPixels = WIDTH * HEIGHT;
+            int blockSize1D = 256;
+            int numBlocks1D = (totalPixels + blockSize1D - 1) / blockSize1D;
+
+            clearScreenKernel << <numBlocks1D, blockSize1D >> > (d_color_buffer, d_depth_buffer, totalPixels);
+            cudaDeviceSynchronize();
+
+            int triIndex = 0;
+            for (const auto& quad : quads) {
+                Vec3 wNorm = rotate3D(quad.normal, rotX, rotY, rotZ);
+                struct PVert { float x, y, z, iz; VaryData vary; } pVerts[4];
+
+                for (int i = 0; i < 4; ++i) {
+                    Vec3 wPos = rotate3D(vertices[quad.v[i]], rotX, rotY, rotZ);
+                    Vec3 cPos = wPos; cPos.z += 4.0f;
+                    if (cPos.z < 0.1f) cPos.z = 0.1f;
+
+                    float fov = 350.0f;
+                    float screenX = (cPos.x / cPos.z) * fov + (WIDTH / 2.0f);
+                    float screenY = (cPos.y / cPos.z) * fov + (HEIGHT / 2.0f);
+
+                    VaryData vary;
+                    vary.v[0] = wNorm.x; vary.v[1] = wNorm.y; vary.v[2] = wNorm.z;
+                    vary.v[3] = -cPos.x; vary.v[4] = -cPos.y; vary.v[5] = -cPos.z;
+                    vary.v[6] = uvs[i].u; vary.v[7] = uvs[i].v;
+
+                    pVerts[i] = { screenX, screenY, cPos.z, 1.0f / cPos.z, vary };
+                }
+
+                int indices[6] = { 0, 1, 2, 0, 2, 3 };
+                for (int t = 0; t < 2; ++t) {
+                    PVert v0 = pVerts[indices[t * 3 + 0]]; PVert v1 = pVerts[indices[t * 3 + 1]]; PVert v2 = pVerts[indices[t * 3 + 2]];
+                    float area = (v1.x - v0.x) * (v2.y - v0.y) - (v2.x - v0.x) * (v1.y - v0.y);
+                    if (area > 0.0f) {
+                        d_triangles[triIndex++] = {
+                            v0.x, v0.y, v0.z, v0.iz, v0.vary,
+                            v1.x, v1.y, v1.z, v1.iz, v1.vary,
+                            v2.x, v2.y, v2.z, v2.iz, v2.vary
+                        };
+                    }
+                }
+            }
+
+            // MÁGICA 2.0: Lança uma Malha 2D sobre a tela inteira!
+            if (triIndex > 0) {
+                dim3 blockSize2D(16, 16);
+                dim3 numBlocks2D((WIDTH + 15) / 16, (HEIGHT + 15) / 16);
+
+                // Dispara 307.200 Threads simultâneas (Uma por pixel)
+                renderPixelsKernel << <numBlocks2D, blockSize2D >> > (fb, d_triangles, triIndex);
+                cudaDeviceSynchronize();
+            }
+
+            formatHDCKernel << <numBlocks1D, blockSize1D >> > (d_color_buffer, d_display_pixels, totalPixels);
+            cudaDeviceSynchronize();
+
+            HDC hdc = GetDC(hwnd);
+            BITMAPINFO bmi = { 0 };
+            bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bmi.bmiHeader.biWidth = WIDTH;
+            bmi.bmiHeader.biHeight = -HEIGHT;
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = BI_RGB;
+
+            SetDIBitsToDevice(hdc, 0, 0, WIDTH, HEIGHT, 0, 0, 0, HEIGHT, d_display_pixels, &bmi, DIB_RGB_COLORS);
+            ReleaseDC(hwnd, hdc);
+
+            rotX += 0.02f; rotY += 0.015f; rotZ += 0.005f;
+        }
+    }
+
+    cudaFree(d_color_buffer);
+    cudaFree(d_depth_buffer);
+    cudaFree(d_triangles);
+    cudaFree(d_display_pixels);
+
+    return 0;
+}
