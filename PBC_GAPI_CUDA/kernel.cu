@@ -90,12 +90,11 @@ __global__ void renderTriangles64Kernel(Framebuffer fb, uint64_t* frame_buffer, 
         bool top_left_edge_a = (edge_a == 0 && (delta_ya < 0 || (delta_ya == 0 && delta_xa > 0)));
         bool top_left_edge_b = (edge_b == 0 && (delta_yb < 0 || (delta_yb == 0 && delta_xb > 0)));
         bool top_left_edge_c = (edge_c == 0 && (delta_yc < 0 || (delta_yc == 0 && delta_xc > 0)));
-        bool top_left_edge = top_left_edge_a || top_left_edge_b || top_left_edge_c;
+        bool insideA = edge_a < 0 || (edge_a == 0 && top_left_edge_a);
+        bool insideB = edge_b < 0 || (edge_b == 0 && top_left_edge_b);
+        bool insideC = edge_c < 0 || (edge_c == 0 && top_left_edge_c);
 
-        if ((edge_a < 0 && edge_b < 0 && edge_c < 0) || top_left_edge) {
-            if (edge_a == 0 && !top_left_edge) continue;
-            if (edge_b == 0 && !top_left_edge) continue;
-            if (edge_c == 0 && !top_left_edge) continue;
+        if (insideA && insideB && insideC) {
 
             float a = 0.5f * abs(j * (y1 - y2) + x1 * (y2 - i) + x2 * (i - y1)) / area_tri;
             float b = 0.5f * abs(x * (i - y2) + j * (y2 - y) + x2 * (y - i)) / area_tri;

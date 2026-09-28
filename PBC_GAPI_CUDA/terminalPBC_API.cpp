@@ -1,6 +1,6 @@
 #pragma once
 
-// === PROTE«√O CONTRA O VISUAL STUDIO (WIN32) ===
+// === PROTE√á√ÉO CONTRA O VISUAL STUDIO (WIN32) ===
 #if defined(_WIN32)
 #define NOMINMAX
 #include <windows.h>
@@ -27,7 +27,7 @@
 #define PBC_POW std::pow
 #endif
 
-// Estruturas Matem·ticas B·sicas
+// Estruturas Matem√°ticas B√°sicas
 struct Color { float a, r, g, b; };
 struct Vec3 { float x, y, z; };
 struct Vec2 { float u, v; };
@@ -37,7 +37,7 @@ struct Quad { int v[4]; Vec3 normal; };
 // Substitua a struct VaryData (remova o __HD__):
 struct VaryData { float v[8]; };
 
-// O Framebuffer com a proteÁ„o de macro corrigida:
+// O Framebuffer com a prote√ß√£o de macro corrigida:
 class Framebuffer {
 public:
     int width, height;
@@ -57,7 +57,7 @@ public:
         return { 1.0f, 0.8f, 0.8f, 0.8f };
     }
 
-    // A M¡GICA EST¡ AQUI: Apenas #ifdef _WIN32, permitindo que a CPU a veja mesmo no CUDA!
+    // A M√ÅGICA EST√Å AQUI: Apenas #ifdef _WIN32, permitindo que a CPU a veja mesmo no CUDA!
 #ifdef _WIN32
     void displayHDC(HDC hdc) const {
         BITMAPINFO bmi = { 0 };
@@ -114,7 +114,7 @@ inline __HD__ Color SimplePhongTexture2(const VaryData& vary, const Framebuffer&
     };
 }
 
-// Rasterizador de Tri‚ngulos Adaptado
+// Rasterizador de Tri√¢ngulos Adaptado
 template <typename FragmentShader>
 __HD__ void ShaderTri(float x, float y, float z, float x1, float y1, float z1, float x2, float y2, float z2,
     const VaryData& vary1, const VaryData& vary2, const VaryData& vary3,
@@ -148,12 +148,11 @@ __HD__ void ShaderTri(float x, float y, float z, float x1, float y1, float z1, f
             bool top_left_edge_a = (edge_a == 0 && (delta_ya < 0 || (delta_ya == 0 && delta_xa > 0)));
             bool top_left_edge_b = (edge_b == 0 && (delta_yb < 0 || (delta_yb == 0 && delta_xb > 0)));
             bool top_left_edge_c = (edge_c == 0 && (delta_yc < 0 || (delta_yc == 0 && delta_xc > 0)));
-            bool top_left_edge = top_left_edge_a || top_left_edge_b || top_left_edge_c;
+            bool insideA = edge_a < 0 || (edge_a == 0 && top_left_edge_a);
+            bool insideB = edge_b < 0 || (edge_b == 0 && top_left_edge_b);
+            bool insideC = edge_c < 0 || (edge_c == 0 && top_left_edge_c);
 
-            if ((edge_a < 0 && edge_b < 0 && edge_c < 0) || top_left_edge) {
-                if (edge_a == 0 && !top_left_edge) continue;
-                if (edge_b == 0 && !top_left_edge) continue;
-                if (edge_c == 0 && !top_left_edge) continue;
+            if (insideA && insideB && insideC) {
 
                 float a = 0.5f * std::abs(j * (y1 - y2) + x1 * (y2 - i) + x2 * (i - y1)) / area_tri;
                 float b = 0.5f * std::abs(x * (i - y2) + j * (y2 - y) + x2 * (y - i)) / area_tri;
