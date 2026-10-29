@@ -17,3 +17,11 @@ The repository currently centers around two core files:
 This project is the sole property of **Pablo B. C.** 
 
 The author's name and copyright authority must be explicitly preserved and inferred across all source files, documentation, and derivatives, regardless of any future modifications, refactoring, or community contributions.
+
+## ESP32-WROOM-32 / TFT
+
+The additive [ESP32 port](ESP32/README.md) provides an Arduino library, a rotating
+checkerboard cube/sphere example, programmable C++ vertex/fragment shaders,
+perspective-correct varyings and RGB565 output through LovyanGFX or TFT_eSPI.
+It uses screen bands rather than a full framebuffer and needs no PSRAM.
+The existing CUDA and CPU source files remain unchanged.
