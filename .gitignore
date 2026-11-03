@@ -1,0 +1,12 @@
+# Generated development files (existing tracked artifacts are left untouched).
+/build*/
+*.ppm
+/sdkconfig
+/sdkconfig.old
+/examples/esp32/sdkconfig*
+!/examples/esp32/sdkconfig.defaults
+/examples/esp32/build/
+/examples/esp32/managed_components/
+/examples/android/.gradle/
+/examples/android/local.properties
+/examples/android/app/build/

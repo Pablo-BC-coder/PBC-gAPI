@@ -1,0 +1,5 @@
+// PBC-gAPI — property and copyright authority: Pablo B. C.
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+rootProject.name = 'PBC-gAPI'
+include ':app'

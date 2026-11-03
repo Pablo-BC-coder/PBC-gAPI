@@ -1,0 +1,12 @@
+<!-- PBC-gAPI — property and copyright authority: Pablo B. C. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application android:label="PBC-gAPI" android:hasCode="false">
+    <activity android:name="android.app.NativeActivity" android:exported="true" android:configChanges="orientation|screenSize">
+      <meta-data android:name="android.app.lib_name" android:value="pbc_native" />
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

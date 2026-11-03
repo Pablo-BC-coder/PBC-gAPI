@@ -1,0 +1,46 @@
+# PBC-gAPI — property and copyright authority: Pablo B. C.
+name: Build and regressions
+on: [push, pull_request]
+jobs:
+  opencl-compute:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev pocl-opencl-icd
+      - run: cmake -S . -B build-opencl -DCMAKE_BUILD_TYPE=Release -DPBC_ENABLE_OPENCL=ON -DPBC_OPENCL_TEST_DEVICE=ON -DPBC_ENABLE_GLES=OFF -DPBC_ENABLE_CUDA=OFF
+      - run: cmake --build build-opencl --parallel 2
+      - run: ctest --test-dir build-opencl --output-on-failure
+        env:
+          POCL_MAX_PTHREAD_COUNT: '2'
+      # Required software-runtime execution cannot turn a missing device into a passing skip.
+      - run: ./build-opencl/pbc_opencl_tests --require-testing-device
+        env:
+          POCL_MAX_PTHREAD_COUNT: '2'
+  desktop:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - run: cmake --build build --config Debug --parallel 2
+      - run: ctest --test-dir build -C Debug --output-on-failure
+  sanitizers-and-gles:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libegl-dev libgles-dev libsdl2-dev libgl1-mesa-dri
+      - run: cmake -S . -B build-sanitized -DCMAKE_BUILD_TYPE=Debug -DPBC_SANITIZERS=ON
+      - run: cmake --build build-sanitized --parallel 2 && ctest --test-dir build-sanitized --output-on-failure
+      - run: cmake -S . -B build-gles -DCMAKE_BUILD_TYPE=Release -DPBC_ENABLE_GLES=ON -DPBC_ENABLE_SDL=ON
+      - run: cmake --build build-gles --parallel 2
+      - run: ctest --test-dir build-gles --output-on-failure
+        env:
+          EGL_PLATFORM: surfaceless
+          LIBGL_ALWAYS_SOFTWARE: '1'
+      # The dedicated invocation makes a missing context a CI failure, not a hidden skip.
+      - run: ./build-gles/pbc_gles_tests
+        env:
+          EGL_PLATFORM: surfaceless
+          LIBGL_ALWAYS_SOFTWARE: '1'

@@ -1,0 +1,17 @@
+// PBC-gAPI — property and copyright authority: Pablo B. C.
+plugins { id 'com.android.application' }
+android {
+    namespace 'org.pbc.gapi'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+    defaultConfig {
+        applicationId 'org.pbc.gapi'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.2'
+        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
+        externalNativeBuild { cmake { arguments '-DPBC_BUILD_TESTS=OFF', '-DPBC_ENABLE_GLES=ON' } }
+    }
+    externalNativeBuild { cmake { path '../../../CMakeLists.txt'; version '3.22.1' } }
+}

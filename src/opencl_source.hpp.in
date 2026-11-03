@@ -1,0 +1,5 @@
+// PBC-gAPI — property and copyright authority: Pablo B. C.
+#pragma once
+namespace pbc { namespace detail {
+inline constexpr const char* OpenClSource=R"PBC_CL(@PBC_OPENCL_KERNEL@)PBC_CL";
+} }
