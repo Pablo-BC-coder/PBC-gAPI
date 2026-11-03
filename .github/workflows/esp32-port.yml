@@ -1,0 +1,45 @@
+# PBC-gAPI — Copyright Pablo B. C.
+name: ESP32 port
+on:
+  push:
+    paths: ['ESP32/**', '.github/workflows/esp32-port.yml']
+  pull_request:
+    paths: ['ESP32/**', '.github/workflows/esp32-port.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash ESP32/tests/run.sh
+  esp32:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - lovyan-ili9341
+          - espi-ili9341
+          - lovyan-parallel-ili9341
+          - espi-parallel-ili9341
+          - lovyan-st7789
+          - espi-st7789
+          - lovyan-ili9488
+          - espi-ili9488
+          - lovyan-parallel-touch
+          - espi-parallel-touch
+          - lovyan-ili9341-half
+          - espi-ili9341-half
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.2.0
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: esp32-6.9.0-${{ matrix.environment }}-${{ hashFiles('ESP32/platformio.ini') }}
+      - run: pio run -d ESP32 -e ${{ matrix.environment }}
